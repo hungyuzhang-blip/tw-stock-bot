@@ -1455,6 +1455,13 @@ def get_stock_analysis(stock_id):
         print("找不到這支股票的資料，或歷史資料不足以分析，請檢查代號是否正確。")
         return
 
+    # 移除 NaN 收盤價（Yahoo 盤中尚未更新）
+    df = df.dropna(subset=["Close"])
+    if df.empty or len(df) < FORECAST_DAYS + 60:
+        print("資料不足，無法分析。")
+        return
+
+    print(f"最新有效交易日：{df.iloc[-1].name.strftime('%Y-%m-%d')}，收盤價：{df.iloc[-1]['Close']:.2f}")
     print("正在分析技術指標、趨勢過濾與籌碼面...")
     df = compute_indicators(df)
 
