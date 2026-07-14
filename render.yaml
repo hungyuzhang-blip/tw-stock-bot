@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: tw-stock-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn line_bot:app --workers 1 --threads 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: LINE_CHANNEL_SECRET
+        sync: false

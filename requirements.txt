@@ -1,0 +1,11 @@
+flask>=3.0
+line-bot-sdk>=3.11
+python-dotenv>=1.0
+gunicorn>=22.0
+yfinance>=0.2
+pandas>=2.0
+pandas-ta>=0.3
+twstock>=1.0
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.1
