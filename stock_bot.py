@@ -1,6 +1,7 @@
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
+import ta_lib
 import twstock
 import requests
 import urllib3
@@ -400,27 +401,27 @@ def get_kd_columns(df):
     return k_col, d_col
 
 def compute_indicators(df):
-    kd = ta.stoch(high=df["High"], low=df["Low"], close=df["Close"], k=9, d=3, smooth_k=3)
+    kd = ta_lib.stoch(high=df["High"], low=df["Low"], close=df["Close"], k=9, d=3, smooth_k=3)
     df = pd.concat([df, kd], axis=1)
-    df["RSI"] = ta.rsi(close=df["Close"], length=14)
+    df["RSI"] = ta_lib.rsi(close=df["Close"], length=14)
 
-    macd = ta.macd(close=df["Close"], fast=12, slow=26, signal=9)
+    macd = ta_lib.macd(close=df["Close"], fast=12, slow=26, signal=9)
     df = pd.concat([df, macd], axis=1)
 
-    df["MA5"] = ta.sma(close=df["Close"], length=5)
-    df["SMA20"] = ta.sma(close=df["Close"], length=20)
-    df["SMA60"] = ta.sma(close=df["Close"], length=60)
+    df["MA5"] = ta_lib.sma(close=df["Close"], length=5)
+    df["SMA20"] = ta_lib.sma(close=df["Close"], length=20)
+    df["SMA60"] = ta_lib.sma(close=df["Close"], length=60)
     df["MA20"] = df["SMA20"]
     df["MA60"] = df["SMA60"]
 
-    bbands = ta.bbands(close=df["Close"], length=20, std=2)
+    bbands = ta_lib.bbands(close=df["Close"], length=20, std=2)
     df = pd.concat([df, bbands], axis=1)
 
-    adx = ta.adx(df["High"], df["Low"], df["Close"], length=14)
+    adx = ta_lib.adx(df["High"], df["Low"], df["Close"], length=14)
     df = pd.concat([df, adx], axis=1)
 
-    df["VOL_MA5"] = ta.sma(close=df["Volume"], length=5)
-    df["VOL_MA20"] = ta.sma(close=df["Volume"], length=20)
+    df["VOL_MA5"] = ta_lib.sma(close=df["Volume"], length=5)
+    df["VOL_MA20"] = ta_lib.sma(close=df["Volume"], length=20)
     df["VOL_RATIO"] = df["Volume"] / df["VOL_MA20"]
     df["TREND"] = df.apply(classify_trend, axis=1)
     return df
