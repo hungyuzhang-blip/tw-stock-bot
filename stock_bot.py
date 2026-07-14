@@ -388,6 +388,15 @@ def get_effective_volume(df):
             return volume, offset
     return 0, None
 
+
+def get_last_valid_row(df):
+    """取得最後一筆有有效收盤價的資料列"""
+    for i in range(len(df)):
+        row = df.iloc[-(i + 1)]
+        if not pd.isna(row["Close"]) and row["Close"] > 0:
+            return -(i + 1), row
+    return -1, df.iloc[-1]
+
 def get_bb_columns(df):
     return (
         next(col for col in df.columns if col.startswith("BBL_")),
@@ -926,6 +935,11 @@ def estimate_2week_probability(df, total_score, trend_state):
 
 def analyze_stock_from_df(stock_id, category, df, skip_probability=False):
     if df is None or df.empty or len(df) < FORECAST_DAYS + 60:
+        return None
+
+    # 移除尾端 NaN 收盤價（Yahoo 盤中尚未更新的資料）
+    df = df.dropna(subset=["Close"])
+    if df.empty or len(df) < FORECAST_DAYS + 60:
         return None
 
     df = compute_indicators(df)
