@@ -4,7 +4,7 @@ python-dotenv>=1.0
 gunicorn>=22.0
 yfinance>=0.2
 pandas>=2.0
-pandas-ta>=0.3
+pandas-ta==0.4.71b0
 twstock>=1.0
 requests>=2.31
 beautifulsoup4>=4.12
