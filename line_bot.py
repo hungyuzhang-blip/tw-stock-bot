@@ -181,29 +181,31 @@ def handle_message(event):
     text = event.message.text.strip()
     cmd = parse_command(text)
 
+    # 印到 Render Logs，方便追蹤
+    app.logger.info(f"📩 收到訊息 | user={user_id} | text={text} | cmd={cmd['type']}")
+
     reply_text = ""
 
     if cmd["type"] == "help":
         reply_text = build_help_message()
+        app.logger.info("✅ 回覆：說明選單")
 
     elif cmd["type"] == "stock":
         stock_id = cmd["stock_id"]
-        # 先回覆一則「正在分析」的訊息
-        quick_reply = f"🔍 正在分析 {stock_id} {get_stock_name(stock_id)}，請稍候..."
-        _reply_message(event, quick_reply)
-        # 執行完整分析
+        stock_name = get_stock_name(stock_id)
+        app.logger.info(f"🔍 開始分析股票 {stock_id} {stock_name}")
         reply_text = build_stock_reply(stock_id)
+        app.logger.info(f"✅ 股票分析完成 {stock_id}")
 
     elif cmd["type"] == "scan":
-        _reply_message(event, "🔍 正在執行每日熱門股池掃描，請稍候（約 1-2 分鐘）...")
+        app.logger.info("🔍 開始每日掃描")
         reply_text = build_scan_reply()
+        app.logger.info("✅ 每日掃描完成")
 
     elif cmd["type"] == "full_market":
-        _reply_message(
-            event,
-            "🔍 正在執行全市場掃描（約 10-20 分鐘），完成後會自動回覆報告..."
-        )
-        # 全市場掃描需要較長時間，用 Thread 非同步處理
+        app.logger.info("🔍 開始全市場掃描（背景執行）")
+        _reply_message(event, "🔍 正在執行全市場掃描（約 10-20 分鐘），完成後會自動回覆報告...")
+        # 全市場掃描太久了，非同步執行完用 push_message
         Thread(
             target=_async_full_market_reply,
             args=(event,),
@@ -212,10 +214,8 @@ def handle_message(event):
         return
 
     else:
-        reply_text = (
-            f"❌ 無法識別指令：{text}\n\n"
-            f"請輸入「說明」查看使用方式。"
-        )
+        app.logger.warning(f"❌ 無法識別指令：{text}")
+        reply_text = f"❌ 無法識別指令：{text}\n\n請輸入「說明」查看使用方式。"
 
     _reply_message(event, reply_text)
 
@@ -233,6 +233,52 @@ def _reply_message(event, text: str):
             )
     except Exception as e:
         app.logger.error(f"回覆失敗：{e}")
+
+
+def _async_stock_reply(event, stock_id):
+    """非同步執行股票分析（背景執行緒）"""
+    try:
+        report = build_stock_reply(stock_id)
+        with ApiClient(configuration) as api_client:
+            line_api = MessagingApi(api_client)
+            line_api.push_message(
+                to=event.source.user_id,
+                messages=[TextMessage(text=report)],
+            )
+    except Exception as e:
+        app.logger.error(f"股票分析非同步發送失敗：{e}")
+        try:
+            with ApiClient(configuration) as api_client:
+                line_api = MessagingApi(api_client)
+                line_api.push_message(
+                    to=event.source.user_id,
+                    messages=[TextMessage(text=f"⚠️ 分析 {stock_id} 時發生錯誤：{str(e)[:200]}")],
+                )
+        except Exception:
+            pass
+
+
+def _async_scan_reply(event):
+    """非同步執行每日掃描（背景執行緒）"""
+    try:
+        report = build_scan_reply()
+        with ApiClient(configuration) as api_client:
+            line_api = MessagingApi(api_client)
+            line_api.push_message(
+                to=event.source.user_id,
+                messages=[TextMessage(text=report)],
+            )
+    except Exception as e:
+        app.logger.error(f"每日掃描非同步發送失敗：{e}")
+        try:
+            with ApiClient(configuration) as api_client:
+                line_api = MessagingApi(api_client)
+                line_api.push_message(
+                    to=event.source.user_id,
+                    messages=[TextMessage(text=f"⚠️ 掃描時發生錯誤：{str(e)[:200]}")],
+                )
+        except Exception:
+            pass
 
 
 def _async_full_market_reply(event):
