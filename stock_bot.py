@@ -28,8 +28,8 @@ STOCK_CODE_PATTERN = re.compile(r"(?<![0-9])([1-9][0-9]{3})(?![0-9])")
 YAHOO_QUOTE_PATTERN = re.compile(r"/quote/(\d{4})")
 TWSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
 SCAN_RESULTS_DIR = "scan_results"
-FULL_SCAN_WORKERS = 20
-FULL_SCAN_BATCH_SIZE = 100
+FULL_SCAN_WORKERS = 5
+FULL_SCAN_BATCH_SIZE = 30
 SCAN_FAST_PERIOD = "2y"
 
 HOT_STOCK_POOL = {
