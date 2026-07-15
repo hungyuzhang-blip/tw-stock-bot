@@ -1008,7 +1008,14 @@ def analyze_stock_for_scan(stock_id, category, df=None, skip_probability=False):
     return analyze_stock_from_df(stock_id, category, df, skip_probability=skip_probability)
 
 def format_strategy_status(result):
-    return format_five_strategy_status(result)
+    score = result.get("score", 0)
+    if score >= 10:
+        return "🔴強買"
+    if score >= 6:
+        return "🟢買入"
+    if score >= 4:
+        return "🟡觀察"
+    return "⚪觀望"
 
 SCAN_CSV_COLUMNS = [
     "rank",
@@ -1017,13 +1024,10 @@ SCAN_CSV_COLUMNS = [
     "market",
     "close",
     "date",
-    "A_多頭回檔",
-    "B_動能突破",
-    "C_超賣反彈",
-    "原策略三",
-    "經典1+3",
-    "五大策略",
+    "score",
+    "signal",
     "up_prob",
+    "sample_count",
     "is_recommended",
     "rec_type",
     "trend",
@@ -1031,6 +1035,8 @@ SCAN_CSV_COLUMNS = [
 ]
 
 def result_to_csv_row(result, rank=None):
+    score = result.get("score", 0)
+    sig = "🔴強買" if score >= 10 else ("🟢買入" if score >= 6 else ("🟡觀察" if score >= 4 else "⚪觀望"))
     up_prob = result["up_prob"]
     row = {
         "rank": rank if rank is not None else "",
@@ -1039,13 +1045,10 @@ def result_to_csv_row(result, rank=None):
         "market": result["category"],
         "close": result["close"],
         "date": result["date"],
-        "A_多頭回檔": "○" if result.get("strategy_1_buy") else "✗",
-        "B_動能突破": "○" if result.get("strategy_2_buy") else "✗",
-        "C_超賣反彈": "○" if result.get("strategy_3_buy") else "✗",
-        "原策略三": "○" if result.get("legacy_s3_alone_buy") else "✗",
-        "經典1+3": "○" if result.get("legacy_1_3_buy") else "✗",
-        "五大策略": format_five_strategy_status(result),
+        "score": score,
+        "signal": sig,
         "up_prob": up_prob if up_prob >= 0 else "",
+        "sample_count": result.get("sample_count", 0),
         "is_recommended": result["is_recommended"],
         "rec_type": result.get("rec_type") or "",
         "trend": result["trend"],
@@ -1155,7 +1158,7 @@ def scan_all_stocks_parallel(stock_ids, progress_step=100):
                         failed_ids.append(stock_id)
                         continue
                     all_results.append(result)
-                    if has_any_strategy_trigger(result):
+                    if result.get("score", 0) >= SCORE_THRESHOLD_WATCH:
                         triggered_ids.add(stock_id)
 
         for stock_id in batch_ids:
@@ -1169,7 +1172,7 @@ def scan_all_stocks_parallel(stock_ids, progress_step=100):
                 failed_ids.append(stock_id)
                 continue
             all_results.append(result)
-            if has_any_strategy_trigger(result):
+            if result.get("score", 0) >= SCORE_THRESHOLD_WATCH:
                 triggered_ids.add(stock_id)
 
         if completed % progress_step < FULL_SCAN_BATCH_SIZE or completed == total:
@@ -1200,9 +1203,11 @@ def full_market_scanner():
     save_scan_results_csv(triggered_path, triggered, sort_by_win_rate=True)
 
     for item in triggered:
+        score = item.get("score", 0)
+        sig = "🔴強買" if score >= 10 else ("🟢買入" if score >= 6 else ("🟡觀察" if score >= 4 else "⚪觀望"))
         print(
             f"  ○ {item['stock_id']} {item['stock_name']} "
-            f"[{format_five_strategy_status(item)}] 勝率 {item['up_prob']}%"
+            f"[{sig}] 評分 {score} 勝率 {item['up_prob']}%"
         )
 
     report = format_full_market_report(
