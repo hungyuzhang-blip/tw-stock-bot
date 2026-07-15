@@ -1365,9 +1365,11 @@ def format_daily_line_report(
     lines.append(f"　焦點新股觸發：{len(trending_triggered or [])} 檔")
     lines.append(f"　篩選條件：場景共振或突破/反彈 + 回測勝率 > {RECOMMEND_MIN_WIN_RATE}%")
     if trending_info:
-        lines.append(f"　焦點新股清單：{', '.join(trending_info['new_trending_stocks']) or '無'}")
+        trending_names = [f"{sid} {get_stock_name(sid)}" for sid in trending_info['new_trending_stocks']]
+        lines.append(f"　焦點新股清單：{', '.join(trending_names) or '無'}")
     if failed_ids:
-        lines.append(f"　失敗代號：{', '.join(failed_ids)}")
+        failed_names = [f"{sid} {get_stock_name(sid)}" for sid in failed_ids]
+        lines.append(f"　失敗代號：{', '.join(failed_names)}")
     if trending_info and trending_info["source_details"]["errors"]:
         lines.append(f"　擷取警告：{'；'.join(trending_info['source_details']['errors'])}")
     lines.append("")
