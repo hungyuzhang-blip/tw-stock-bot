@@ -1065,51 +1065,34 @@ def save_scan_results_csv(filepath, results, sort_by_win_rate=False):
             writer.writerow(result_to_csv_row(result, rank=rank))
 
 def format_full_market_report(scan_date, all_results, triggered, failed_ids, file_paths):
+    total = len(all_results) + len(failed_ids)
     lines = [
-        f"📅 {scan_date} 全市場掃描報告",
+        f"📅 {scan_date} 全市場掃描",
         "━━━━━━━━━━━━━━━━━━━━",
-        f"🔍 掃描範圍：上市 + 上櫃普通股，共 {len(all_results) + len(failed_ids)} 檔",
-        f"　成功：{len(all_results)} 檔｜失敗：{len(failed_ids)} 檔",
-        f"　策略觸發：{len(triggered)} 檔",
-        "",
-        f"💾 已寫入檔案：",
-        f"　全部結果：{file_paths['all']}（觸發股票依勝率置頂）",
-        f"　觸發篩選：{file_paths['triggered']}（依勝率排序）",
+        f"🔍 共 {total} 檔｜推薦 {len(triggered)} 檔｜失敗 {len(failed_ids)} 檔",
         "",
     ]
 
-    recommended = sort_results_by_win_rate([r for r in triggered if r["is_recommended"]])
-    if recommended:
-        lines.append(f"🔥 觸發且符合推薦條件（{len(recommended)} 檔）")
-        lines.append("────────────────────")
-        for idx, item in enumerate(recommended, 1):
-            rec_label = get_rec_type_label(item.get("rec_type"))
-            lines.extend([
-                f"【{idx}】{item['stock_id']} {item['stock_name']}（{rec_label}）",
-                f"　五大策略：{format_five_strategy_compact(item)}",
-                f"　2週上漲機率：{item['up_prob']}%｜收盤：${item['close']}",
-                "",
-            ])
-
     if triggered:
-        lines.append(f"📋 全部觸發股票（依勝率排序，{len(triggered)} 檔）")
-        lines.append("────────────────────")
-        lines.append("　順序：A多頭回檔 B動能突破 C超賣反彈 原策略三 經典1+3")
-        for item in triggered:
-            lines.append(
-                f"・{item['stock_id']} {item['stock_name']}｜{format_five_strategy_compact(item)} "
-                f"｜勝率 {item['up_prob']}%"
-            )
+        lines.append("🔥 推薦名單")
+        lines.append("股票代號 股票名稱       評分 買入訊號           2年回測勝率(觸發次數)")
+        lines.append("──────────────────────────────────────────")
+        for item in sort_results_by_win_rate(triggered):
+            sid = item['stock_id']
+            name = item['stock_name']
+            score = item.get('score', 0)
+            up = item.get('up_prob', -1)
+            cnt = item.get('sample_count', 0)
+            sig = "🔴強買" if score >= 10 else ("🟢買入" if score >= 6 else ("🟡觀察" if score >= 4 else "⚪觀望"))
+            up_str = f"{up}%" if up >= 0 else "-"
+            cnt_str = f"({cnt})" if cnt else ""
+            lines.append(f"{sid} {name:<6s}  {score}分 {sig:<6s}  {up_str:>4s}{cnt_str}")
         lines.append("")
     else:
-        lines.extend([
-            "📋 全部觸發股票（0 檔）",
-            "────────────────────",
-            "　今日無任何策略觸發",
-            "",
-        ])
+        lines.append("🔥 推薦名單（0 檔）")
+        lines.append("")
 
-    lines.append("⚠️ 本報告僅供技術面參考，非投資建議。")
+    lines.append("⚠️ 僅供參考，非投資建議。")
     return "\n".join(lines)
 
 def enrich_triggered_results(triggered):
@@ -1366,97 +1349,34 @@ def daily_stock_scanner():
 
 def get_stock_analysis(stock_id):
     formatted_id = get_yfinance_symbol(stock_id)
-    print(f"正在抓取 {formatted_id} 的資料（含 {BACKTEST_PERIOD} 大歷史）...")
-
     stock_name = get_stock_name(stock_id)
     df = yf.Ticker(formatted_id).history(period=BACKTEST_PERIOD)
 
     if df.empty or len(df) < FORECAST_DAYS + 60:
-        print("找不到這支股票的資料，或歷史資料不足以分析，請檢查代號是否正確。")
+        print(f"❌ {stock_id} {stock_name}：資料不足")
         return
 
-    # 移除 NaN 收盤價（Yahoo 盤中尚未更新）
     df = df.dropna(subset=["Close"])
     if df.empty or len(df) < FORECAST_DAYS + 60:
-        print("資料不足，無法分析。")
+        print(f"❌ {stock_id} {stock_name}：資料不足")
         return
 
-    print(f"最新有效交易日：{df.iloc[-1].name.strftime('%Y-%m-%d')}，收盤價：{df.iloc[-1]['Close']:.2f}")
-    print("正在分析技術指標、趨勢過濾與籌碼面...")
     df = compute_indicators(df)
-
-    trend_filter = get_trend_filter(df)
-    raw_signals, tech_score, tech_values = get_technical_signals(df, trend_filter)
-    tech_signals, tech_score, volume_notes = apply_volume_confirmation(
-        raw_signals, tech_score, tech_values["vol_ratio"]
-    )
-    chip_signals, chip_score, chip_details = get_chip_signals(stock_id)
-    total_score = tech_score + chip_score
-    action = get_action_from_score(total_score)
-    up_prob, down_prob, prob_method, avg_return, sample_count = estimate_2week_probability(
-        df, total_score, trend_filter["trend"]
-    )
     strategy_result = evaluate_multi_factor_strategy(df)
-
+    up_prob, down_prob, prob_method, avg_return, sample_count = estimate_2week_probability(
+        df, 0, df.iloc[-1]["TREND"]
+    )
+    score = strategy_result["score"]
+    sig = "🔴強買" if score >= 10 else ("🟢買入" if score >= 6 else ("🟡觀察" if score >= 4 else "⚪觀望"))
     date_str = df.iloc[-1].name.strftime("%Y-%m-%d")
+    close = df.iloc[-1]["Close"]
 
-    print("\n" + "=" * 43)
-    print(f"📊 股票代號：{stock_id} ｜ {stock_name}")
-    print(f"📅 交易日期：{date_str} ｜ 收盤價：${tech_values['close']}")
-    print("=" * 43)
-
-    print(format_signal_board(strategy_result))
-
-    print("\n🧭 趨勢過濾器：")
-    print(f"   - 趨勢狀態：{trend_filter['trend']}（ADX {trend_filter['adx']}）")
-    for note in trend_filter["notes"]:
-        print(f"   - {note}")
-
-    print("\n📈 技術指標：")
-    print(f"   - K / D：{tech_values['k']}% / {tech_values['d']}%")
-    print(f"   - RSI (14)：{tech_values['rsi']}")
-    print(f"   - MACD：{tech_values['macd']}（訊號 {tech_values['macd_signal']}）")
-    print(
-        f"   - 均線：MA5 {tech_values['ma5']} / MA20 {tech_values['ma20']} / MA60 {tech_values['ma60']}"
-    )
-    print(
-        f"   - 布林通道：下軌 {tech_values['bb_lower']} / 上軌 {tech_values['bb_upper']}"
-    )
-    print(
-        f"   - 成交量：{tech_values['volume']:,}（20 日均量 {tech_values['vol_ma20']:,}）"
-    )
-
-    print("\n📊 量能確認：")
-    for note in volume_notes:
-        print(f"   - {note}")
-
-    print("\n🧩 籌碼面：")
-    for detail in chip_details:
-        print(f"   - {detail}")
-    if chip_signals:
-        print(f"   - 籌碼訊號：{'、'.join(chip_signals)}")
-    else:
-        print("   - 籌碼訊號：中性")
-
-    print("\n📌 技術面訊號（經趨勢過濾 + 量能確認）：")
-    if tech_signals:
-        print(f"   - {'、'.join(tech_signals)}")
-    else:
-        print("   - 指標位於中性區間")
-
-    print(f"\n🔮 未來 2 週預測（{prob_method}）：")
-    print(f"   - 上漲機率：{up_prob}%")
-    print(f"   - 下跌機率：{down_prob}%")
-    if avg_return is not None:
-        print(f"   - 歷史平均報酬：{avg_return:+.2f}%")
-    print(f"   - 回測樣本數：{sample_count} 次")
-
-    print(f"\n✅ 綜合操作建議：{action}")
-    print(f"   - 技術面評分：{tech_score:+d}")
-    print(f"   - 籌碼面評分：{chip_score:+d}")
-    print(f"   - 總評分：{total_score:+d}")
-
-    print("=" * 43)
+    print(f"\n{stock_id} {stock_name}")
+    print(f"評分 {score}分 {sig} ｜ 收盤 ${close:.2f} ({date_str})")
+    print(f"2年回測勝率 {up_prob}%（觸發 {sample_count} 次）")
+    print(f"訊號：{strategy_result['signal']}")
+    if strategy_result["triggered_items"]:
+        print(f"觸發項目：{'、'.join(strategy_result['triggered_items'][:3])}")
 
 if __name__ == "__main__":
     print("=" * 34)
