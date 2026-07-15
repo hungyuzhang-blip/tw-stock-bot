@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 FORECAST_DAYS = 10
-BACKTEST_PERIOD = "5y"
+BACKTEST_PERIOD = "2y"
 ADX_TREND_THRESHOLD = 25
 VOLUME_CONFIRM_RATIO = 0.8
 VOLUME_LOW_RATIO = 0.6
