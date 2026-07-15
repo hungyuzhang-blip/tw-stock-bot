@@ -21,8 +21,8 @@ ADX_TREND_THRESHOLD = 25
 VOLUME_CONFIRM_RATIO = 0.8
 VOLUME_LOW_RATIO = 0.6
 VOLUME_STRONG_RATIO = 1.2
-RECOMMEND_MIN_WIN_RATE = 58
-STRONG_RECOMMEND_MIN_WIN_RATE = 55
+RECOMMEND_MIN_WIN_RATE = 50
+STRONG_RECOMMEND_MIN_WIN_RATE = 50
 TRENDING_TOP_N = 5
 STOCK_CODE_PATTERN = re.compile(r"(?<![0-9])([1-9][0-9]{3})(?![0-9])")
 YAHOO_QUOTE_PATTERN = re.compile(r"/quote/(\d{4})")
@@ -1305,10 +1305,12 @@ def format_daily_line_report(
             ])
         lines.append("")
 
+    MAX_RECOMMEND_SHOW = 10
     if recommendations:
-        lines.append(f"🔥 今日強烈推薦進場名單（{len(recommendations)} 檔）")
+        show_list = recommendations[:MAX_RECOMMEND_SHOW]
+        lines.append(f"🔥 今日推薦進場名單（共 {len(recommendations)} 檔，顯示前 {len(show_list)} 檔）")
         lines.append("────────────────────")
-        for idx, item in enumerate(recommendations, 1):
+        for idx, item in enumerate(show_list, 1):
             rec_label = get_rec_type_label(item.get("rec_type"))
             lines.extend([
                 f"【{idx}】{item['stock_id']} {item['stock_name']}（{rec_label}）",
