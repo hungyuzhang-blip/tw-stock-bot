@@ -17,6 +17,7 @@ from linebot.v3.messaging import (
     ApiClient,
     Configuration,
     MessagingApi,
+    PushMessageRequest,
     ReplyMessageRequest,
     TextMessage,
 )
@@ -286,23 +287,21 @@ def _async_full_market_reply(event):
     try:
         report = build_full_market_reply()
         # LINE 推播訊息也有 5000 字限制
-        if len(report) > 4800:
-            report = report[:4800] + "\n\n⋯（報告過長已截斷）"
+        if len(report) > 4000:
+            report = report[:4000] + "\n\n⋯（報告過長已截斷）"
+        msg = TextMessage(text=report)
+        request = PushMessageRequest(to=event.source.user_id, messages=[msg])
         with ApiClient(configuration) as api_client:
             line_api = MessagingApi(api_client)
-            line_api.push_message(
-                to=event.source.user_id,
-                messages=[TextMessage(text=report)],
-            )
+            line_api.push_message(request)
     except Exception as e:
         app.logger.error(f"非同步全市場掃描失敗：{e}")
         try:
+            err_msg = TextMessage(text=f"⚠️ 全市場掃描發生錯誤，請稍後再試。")
+            err_req = PushMessageRequest(to=event.source.user_id, messages=[err_msg])
             with ApiClient(configuration) as api_client:
                 line_api = MessagingApi(api_client)
-                line_api.push_message(
-                    to=event.source.user_id,
-                    messages=[TextMessage(text=f"⚠️ 全市場掃描發生錯誤：{str(e)[:200]}")],
-                )
+                line_api.push_message(err_req)
         except Exception:
             pass
 
