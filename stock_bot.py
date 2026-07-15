@@ -1240,109 +1240,53 @@ def format_daily_line_report(
     trending_info=None,
     trending_triggered=None,
 ):
-    pool_count = sum(len(v) for v in HOT_STOCK_POOL.values())
-    trending_count = len(trending_info["new_trending_stocks"]) if trending_info else 0
-    total_scan_count = len(all_results) + len(failed_ids)
-
     lines = [
-        f"📅 {scan_date} 台股每日掃描報告",
+        f"📅 {scan_date} 台股每日掃描",
         "━━━━━━━━━━━━━━━━━━━━",
-        f"🔍 掃描範圍：主流股池 {pool_count} 檔 + 網路焦點新股 {trending_count} 檔（共 {total_scan_count} 檔）",
         "",
     ]
 
-    if trending_info and trending_info["top_5_mentioned"]:
-        lines.append("🌐 今日網路熱門提及 TOP 5")
-        lines.append("────────────────────")
-        for stock_id, count in trending_info["top_5_mentioned"]:
-            in_pool = "（已在主流池）" if stock_id in get_hot_pool_stock_ids() else "（焦點新股）"
-            lines.append(f"・{stock_id} {get_stock_name(stock_id)}｜提及 {count} 次{in_pool}")
-        lines.append("")
-
-    if trending_triggered:
-        lines.append("🔥 【今日網路爆紅焦點新股推薦】 🔥")
-        lines.append("----------------------------------")
-        for item in trending_triggered:
-            lines.extend([
-                "偵測來源：PTT 股版 / Yahoo 財經今日熱議",
-                f"股票代號：{item['stock_id']} ({item['stock_name']})",
-                "指標狀態：網路上討論度極高，且技術面多重場景共振表態 (符合)",
-                f"🔮 歷史大數據驗證：未來 2 週上漲機率達 {item['up_prob']}%！",
-                f"五大策略：{format_five_strategy_compact(item)}",
-                f"收盤價：${item['close']}｜回測樣本：{item['sample_count']} 次",
-                "----------------------------------",
-            ])
-        lines.append("")
-
-    MAX_RECOMMEND_SHOW = 10
+    # 推薦進場名單
+    MAX_SHOW = 15
     if recommendations:
-        show_list = recommendations[:MAX_RECOMMEND_SHOW]
-        lines.append(f"🔥 今日推薦進場名單（共 {len(recommendations)} 檔，顯示前 {len(show_list)} 檔）")
-        lines.append("────────────────────")
-        for idx, item in enumerate(show_list, 1):
-            rec_label = get_rec_type_label(item.get("rec_type"))
-            lines.extend([
-                f"【{idx}】{item['stock_id']} {item['stock_name']}（{rec_label}）",
-                f"　產業：{item['category']}",
-                f"　收盤價：${item['close']}（{item['date']}）",
-                f"　五大策略：{format_five_strategy_compact(item)}",
-                f"　（A B C 原策略三 經典1+3）",
-                f"　2週上漲機率：{item['up_prob']}%（回測 {item['sample_count']} 次）",
-                f"　歷史平均報酬：{item['avg_return']:+.2f}%" if item["avg_return"] is not None else "　歷史平均報酬：N/A",
-                f"　趨勢狀態：{item['trend']}",
-                f"　訊號：{item['final_signal']}",
-                "",
-            ])
+        show_list = recommendations[:MAX_SHOW]
+        lines.append(f"🔥 推薦名單（共 {len(recommendations)} 檔）")
+        lines.append("股票代號 股票名稱       評分 買入訊號           2年回測勝率(觸發次數)")
+        lines.append("──────────────────────────────────────────")
+        for item in show_list:
+            sid = item['stock_id']
+            name = item['stock_name']
+            score = item.get('score', 0)
+            rec_type = item.get('rec_type', '')
+            up = item.get('up_prob', -1)
+            cnt = item.get('sample_count', 0)
+            sig = "🔴強買" if score >= 10 else ("🟢買入" if score >= 6 else ("🟡觀察" if score >= 4 else "⚪觀望"))
+            up_str = f"{up}%" if up >= 0 else "-"
+            cnt_str = f"({cnt})" if cnt else ""
+            lines.append(f"{sid} {name:<6s}  {score}分 {sig:<6s}  {up_str:>4s}{cnt_str}")
+        lines.append("")
     else:
-        lines.extend([
-            f"🔥 今日強烈推薦進場名單（0 檔）",
-            "────────────────────",
-            f"　今日無股票符合優化策略且回測勝率 > {RECOMMEND_MIN_WIN_RATE}%",
-            "",
-        ])
+        lines.extend([f"🔥 推薦名單（0 檔）", "　今日無股票符合條件", ""])
 
-    partial_matches = [
-        r for r in all_results
-        if not r["is_recommended"] and sum([r["strategy_1_buy"], r["strategy_2_buy"], r["strategy_3_buy"]]) >= 2
-    ]
-    if partial_matches:
-        lines.append(f"👀 觀察名單（符合 2/3 策略，{len(partial_matches)} 檔）")
-        lines.append("────────────────────")
-        for item in partial_matches:
-            pass_count = sum([item["strategy_1_buy"], item["strategy_2_buy"], item["strategy_3_buy"]])
-            lines.append(
-                f"・{item['stock_id']} {item['stock_name']}｜{format_five_strategy_compact(item)} "
-                f"｜勝率 {item['up_prob']}%"
-            )
+    # 網路熱門提及
+    if trending_info and trending_info["top_5_mentioned"]:
+        lines.append("🌐 網路熱門 TOP 5")
+        for stock_id, count in trending_info["top_5_mentioned"]:
+            lines.append(f"　・{stock_id} {get_stock_name(stock_id)}｜提及 {count} 次")
         lines.append("")
 
-    if all_results:
-        lines.append(f"📋 全體掃描策略一覽（○=觸發 ✗=未觸發）")
-        lines.append("────────────────────")
-        lines.append("　順序：A多頭回檔 B動能突破 C超賣反彈 原策略三 經典1+3")
-        for item in all_results:
-            lines.append(
-                f"・{item['stock_id']} {item['stock_name']}｜{format_five_strategy_compact(item)}"
-            )
-        lines.append("")
-
-    lines.append("📊 掃描摘要")
-    lines.append("────────────────────")
-    lines.append(f"　成功掃描：{len(all_results)} 檔")
-    lines.append(f"　資料失敗：{len(failed_ids)} 檔")
-    lines.append(f"　主流池推薦：{len(recommendations)} 檔")
-    lines.append(f"　焦點新股觸發：{len(trending_triggered or [])} 檔")
-    lines.append(f"　篩選條件：場景共振或突破/反彈 + 回測勝率 > {RECOMMEND_MIN_WIN_RATE}%")
+    # 掃描摘要（簡化）
+    total = len(all_results) + len(failed_ids)
+    lines.append("📊 摘要")
+    lines.append(f"　掃描 {total} 檔｜推薦 {len(recommendations)} 檔｜失敗 {len(failed_ids)} 檔")
     if trending_info:
-        trending_names = [f"{sid} {get_stock_name(sid)}" for sid in trending_info['new_trending_stocks']]
-        lines.append(f"　焦點新股清單：{', '.join(trending_names) or '無'}")
+        names = [f"{sid}" for sid in trending_info['new_trending_stocks']]
+        if names:
+            lines.append(f"　焦點新股：{' '.join(names)}")
     if failed_ids:
-        failed_names = [f"{sid} {get_stock_name(sid)}" for sid in failed_ids]
-        lines.append(f"　失敗代號：{', '.join(failed_names)}")
-    if trending_info and trending_info["source_details"]["errors"]:
-        lines.append(f"　擷取警告：{'；'.join(trending_info['source_details']['errors'])}")
+        lines.append(f"　失敗：{' '.join(failed_ids)}")
     lines.append("")
-    lines.append("⚠️ 本報告僅供技術面參考，非投資建議。")
+    lines.append("⚠️ 僅供參考，非投資建議。")
 
     return "\n".join(lines)
 
