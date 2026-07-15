@@ -45,6 +45,13 @@ D_COL = "STOCHd_9_3_3"
 BBL_NEAR_RATIO = 1.02
 STRATEGY_VOL_RATIO = 1.2
 
+# ─── 新策略評分權重 ────────────────────────────────────
+SCORE_THRESHOLD_BUY = 6        # 總分 >= 6 → 買入訊號
+SCORE_THRESHOLD_STRONG = 10    # 總分 >= 10 → 強烈買入
+SCORE_THRESHOLD_WATCH = 4      # 總分 >= 4 → 觀察
+RECOMMEND_MIN_WIN_RATE = 50
+STRONG_RECOMMEND_MIN_WIN_RATE = 50
+
 def get_stock_name(stock_id):
     info = twstock.codes.get(stock_id)
     return info.name if info else "未知"
@@ -443,8 +450,15 @@ def is_strong_bear(row):
         and row["Close"] < row["SMA20"] < row["SMA60"]
     )
 
-def evaluate_triple_buy_strategies(df):
-    """三場景分層策略（回測優化版，取代原本互相矛盾的條件）"""
+def evaluate_multi_factor_strategy(df):
+    """四大面向綜合評分策略
+    
+    回傳：
+        score: 總分
+        signal: 最終訊號文字
+        details: 各面向明細
+        triggered_items: 觸發的細項列表
+    """
     k_col, d_col = get_kd_columns(df)
     bbl_col, bbm_col, _ = get_bb_columns(df)
     latest = df.iloc[-1]
@@ -459,130 +473,130 @@ def evaluate_triple_buy_strategies(df):
     volume, _ = get_effective_volume(df)
     vol_ma5 = latest["VOL_MA5"]
     vol_ma20 = latest["VOL_MA20"]
+    sma20 = latest["SMA20"]
+    sma60 = latest["SMA60"]
+    macd = latest["MACD_12_26_9"]
+    macd_signal = latest["MACDs_12_26_9"]
+    macd_hist = latest["MACDh_12_26_9"]
+    prev_macd = prev["MACD_12_26_9"]
+    prev_macd_signal = prev["MACDs_12_26_9"]
+    prev_macd_hist = prev["MACDh_12_26_9"]
 
-    # 場景 A：多頭趨勢回檔買進（5年回測勝率 57.2%）
-    scenario_a = (
-        close > latest["SMA60"]
-        and latest["SMA20"] > latest["SMA60"]
-        and 35 <= rsi <= 52
-        and latest["MACDh_12_26_9"] > prev["MACDh_12_26_9"]
-        and k_value > d_value
-        and vol_ma20 > 0
-        and volume > vol_ma20 * 0.8
-    )
+    score = 0
+    triggered_items = []
+    details = {"均線買入訊號": [], "技術指標買入訊號": [], "K線量價買入訊號": [], "籌碼面買入訊號": []}
 
-    # 場景 B：動能突破（5年回測勝率 58.9%）
-    scenario_b = (
-        close > latest["SMA20"] > latest["SMA60"]
-        and latest["MACD_12_26_9"] > latest["MACDs_12_26_9"]
-        and prev["MACD_12_26_9"] <= prev["MACDs_12_26_9"]
-        and 50 <= rsi <= 68
-        and vol_ma20 > 0
-        and volume > vol_ma20 * 1.3
-    )
+    # ─── 一、均線買入訊號（葛蘭碧八大法則）───
+    # 1. 突破均線：均線從下跌轉平緩或往上，股價由下往上突破均線
+    ma_trend_up = sma20 > sma60  # 中期均線在長期均線之上
+    if close > sma60 and ma_trend_up:
+        score += 2
+        triggered_items.append("📈 葛蘭碧突破：股價突破季線且均線多頭")
+        details["均線買入訊號"].append("突破均線：股價突破季線且均線多頭排列")
 
-    # 場景 C：超賣反彈 + 趨勢過濾（5年回測勝率 60.0%）
-    near_lower = close <= latest[bbl_col] * BBL_NEAR_RATIO
-    between_bands = latest[bbl_col] < close < latest[bbm_col]
-    scenario_c = (
-        rsi < 40
-        and (near_lower or between_bands)
-        and k_value > d_value
-        and prev_k <= prev_d
-        and k_value < 40
-        and vol_ma5 > 0
-        and volume > vol_ma5 * STRATEGY_VOL_RATIO
-        and not is_strong_bear(latest)
-    )
+    # 2. 回踩支撐：股價在均線之上，拉回未跌破均線後反彈
+    if close > sma20 > sma60 and prev["Close"] <= sma20 and close > sma20:
+        score += 2
+        triggered_items.append("📈 葛蘭碧回踩：股價回測20日線不破反彈")
+        details["均線買入訊號"].append("回踩支撐：股價回測20日線不破反彈")
 
-    strategy_1_buy = scenario_a
-    strategy_2_buy = scenario_b
-    strategy_3_buy = scenario_c
-    pass_count = sum([scenario_a, scenario_b, scenario_c])
-    primary_signal = scenario_b or scenario_c
+    # 3. 假跌破：股價跌破上升中的均線，隨即又漲回
+    if prev["Close"] < sma20 and close > sma20 and sma20 > prev["SMA20"]:
+        score += 2
+        triggered_items.append("📈 葛蘭碧假跌破：跌破20日線後立即站回")
+        details["均線買入訊號"].append("假跌破：股價跌破上升20日線後立即站回")
 
-    # 經典策略 1+3（原邏輯保留，5年回測 14次、勝率57.1%、平均報酬+9.11%）
-    legacy_s1 = (
-        close > latest["SMA60"]
-        and latest["MACDh_12_26_9"] > prev["MACDh_12_26_9"]
-        and latest["MACD_12_26_9"] > latest["MACDs_12_26_9"]
-    )
-    legacy_s3 = (
-        k_value > d_value
-        and prev_k <= prev_d
-        and k_value < 40
-        and vol_ma5 > 0
-        and volume > vol_ma5 * STRATEGY_VOL_RATIO
-    )
-    legacy_1_3_buy = legacy_s1 and legacy_s3
-    legacy_s3_alone_buy = legacy_s3 and not legacy_s1
+    # 4. 負乖離過大：股價跌破均線且嚴重偏離，有跌深反彈機會
+    bbm_val = latest[bbm_col]
+    bbl_val = latest[bbl_col]
+    neg_deviation = (bbm_val - close) / bbm_val  # 偏離中線比例
+    if close < bbl_val and neg_deviation > 0.05:
+        score += 1
+        triggered_items.append("📈 負乖離過大：股價跌破布林下軌")
+        details["均線買入訊號"].append("負乖離過大：股價跌破布林下軌，乖離率>5%")
 
-    if legacy_1_3_buy:
-        final_signal = "🔥 強烈買入訊號：經典策略 1+3 共振（高報酬模式）"
-    elif legacy_s3_alone_buy:
-        final_signal = "✅ 買入訊號：原策略三（KD 超賣放量轉折）"
-    elif pass_count >= 2:
-        final_signal = "🔥 強烈買入訊號：多重場景共振表態"
-    elif primary_signal:
-        final_signal = "✅ 買入訊號：順勢突破或超賣反彈場景觸發"
+    # ─── 二、技術指標買入訊號 ───
+    # 5. MACD 金叉：快線突破慢線，且柱狀圖由負轉正
+    macd_bull_cross = prev_macd <= prev_macd_signal and macd > macd_signal
+    macd_hist_pos = macd_hist > 0 and prev_macd_hist <= 0
+    if macd_bull_cross:
+        score += 2
+        triggered_items.append("📊 MACD 黃金交叉")
+        details["技術指標買入訊號"].append("MACD 黃金交叉：DIF突破MACD")
+    if macd_hist_pos:
+        score += 1
+        triggered_items.append("📊 MACD 柱狀體由負轉正")
+        details["技術指標買入訊號"].append("MACD 柱狀體轉正")
+
+    # 6. KD 低檔黃金交叉：K值<20由下往上突破D值
+    if k_value > d_value and prev_k <= prev_d and k_value < 20:
+        score += 2
+        triggered_items.append("📊 KD 低檔黃金交叉 (K<20)")
+        details["技術指標買入訊號"].append("KD 低檔黃金交叉：K值<20由下往上突破D值")
+    elif k_value > d_value and prev_k <= prev_d and k_value < 40:
+        score += 1
+        triggered_items.append("📊 KD 黃金交叉 (K<40)")
+        details["技術指標買入訊號"].append("KD 黃金交叉：K值<40由下往上突破D值")
+
+    # 7. RSI 超賣區回升：RSI<20後開始向上反彈
+    if rsi > 30 and prev["RSI"] < 30:
+        score += 2
+        triggered_items.append("📊 RSI 超賣區回升")
+        details["技術指標買入訊號"].append("RSI 超賣區回升：RSI從30以下反彈")
+    elif rsi < 20 and rsi > prev["RSI"]:
+        score += 1
+        triggered_items.append("📊 RSI 深超賣反彈")
+        details["技術指標買入訊號"].append("RSI 深超賣區反彈")
+
+    # ─── 三、K線量價買入訊號 ───
+    # 8. 價漲量增：股價上漲時成交量放大
+    if close > prev["Close"] and vol_ma20 > 0 and volume > vol_ma20 * 1.3:
+        score += 2
+        triggered_items.append("💰 價漲量增：漲幅配合1.3倍均量")
+        details["K線量價買入訊號"].append("價漲量增：股價上漲且成交量>20日均量1.3倍")
+
+    # 9. 低檔大陽線：長期下跌後，低點爆量長紅K
+    price_change = (close - prev["Close"]) / prev["Close"]
+    if price_change > 0.03 and volume > vol_ma20 * 1.5 and sma20 < sma60:
+        score += 2
+        triggered_items.append("💰 低檔大陽線：跌幅後爆量長紅")
+        details["K線量價買入訊號"].append("低檔大陽線：長期下跌後爆量長紅K(漲幅>3%)")
+
+    # 10. 突破盤整區：帶量突破長期橫盤整理平台
+    high_20 = df["High"].rolling(20).max()
+    if close >= high_20.iloc[-2] and volume > vol_ma20 * 1.3:
+        score += 2
+        triggered_items.append("💰 突破盤整：帶量突破20日高點")
+        details["K線量價買入訊號"].append("突破盤整：股價帶量突破20日高點")
+
+    # ─── 四、籌碼面買入訊號（由外部傳入，此處僅佔位）───
+    # 實際籌碼分數會由 get_chip_signals 計算後加入
+
+    # ─── 決定最終訊號 ───
+    if score >= SCORE_THRESHOLD_STRONG:
+        signal = f"🔥🔥 強烈買入訊號（總分 {score} 分）"
+    elif score >= SCORE_THRESHOLD_BUY:
+        signal = f"✅ 買入訊號（總分 {score} 分）"
+    elif score >= SCORE_THRESHOLD_WATCH:
+        signal = f"👀 觀察名單（總分 {score} 分）"
     else:
-        final_signal = "⚪ 觀望訊號：尚未觸發買入場景"
+        signal = f"⚪ 觀望（總分 {score} 分）"
 
     return {
-        "strategy_1_buy": strategy_1_buy,
-        "strategy_2_buy": strategy_2_buy,
-        "strategy_3_buy": strategy_3_buy,
-        "pass_count": pass_count,
-        "primary_signal": primary_signal,
-        "legacy_s1_buy": legacy_s1,
-        "legacy_s3_buy": legacy_s3,
-        "legacy_s3_alone_buy": legacy_s3_alone_buy,
-        "legacy_1_3_buy": legacy_1_3_buy,
-        "final_signal": final_signal,
-        "details": {
-            "strategy_1": {
-                "站穩季線且均線多頭": close > latest["SMA60"] and latest["SMA20"] > latest["SMA60"],
-                "RSI 回檔區 35-52": 35 <= rsi <= 52,
-                "MACD 柱狀體轉強": latest["MACDh_12_26_9"] > prev["MACDh_12_26_9"],
-                "KD 多頭排列": k_value > d_value,
-                "量能達 20 日均量 80%": vol_ma20 > 0 and volume > vol_ma20 * 0.8,
-            },
-            "strategy_2": {
-                "均線多頭排列": close > latest["SMA20"] > latest["SMA60"],
-                "MACD 黃金交叉": latest["MACD_12_26_9"] > latest["MACDs_12_26_9"] and prev["MACD_12_26_9"] <= prev["MACDs_12_26_9"],
-                "RSI 動能區 50-68": 50 <= rsi <= 68,
-                "放量 1.3 倍均量": vol_ma20 > 0 and volume > vol_ma20 * 1.3,
-            },
-            "strategy_3": {
-                "RSI 超賣 < 40": rsi < 40,
-                "布林下軌支撐": near_lower or between_bands,
-                "KD 黃金交叉且 K<40": k_value > d_value and prev_k <= prev_d and k_value < 40,
-                "放量 1.2 倍均量": vol_ma5 > 0 and volume > vol_ma5 * STRATEGY_VOL_RATIO,
-                "非強勢空頭": not is_strong_bear(latest),
-            },
-            "legacy_s3_alone": {
-                "KD 黃金交叉": k_value > d_value and prev_k <= prev_d,
-                "K 值低於 40": k_value < 40,
-                "放量 1.2 倍均量": vol_ma5 > 0 and volume > vol_ma5 * STRATEGY_VOL_RATIO,
-            },
-            "legacy_1_3": {
-                "原策略一：收盤價高於 SMA60": close > latest["SMA60"],
-                "原策略一：MACD 柱狀體轉強": latest["MACDh_12_26_9"] > prev["MACDh_12_26_9"],
-                "原策略一：MACD 快線大於訊號線": latest["MACD_12_26_9"] > latest["MACDs_12_26_9"],
-                "原策略三：KD 黃金交叉": k_value > d_value and prev_k <= prev_d,
-                "原策略三：K 值低於 40": k_value < 40,
-                "原策略三：放量 1.2 倍均量": vol_ma5 > 0 and volume > vol_ma5 * STRATEGY_VOL_RATIO,
-            },
-        },
+        "score": score,
+        "signal": signal,
+        "is_recommended": score >= SCORE_THRESHOLD_BUY,
+        "rec_type": "strong" if score >= SCORE_THRESHOLD_STRONG else ("normal" if score >= SCORE_THRESHOLD_BUY else None),
+        "is_watch": SCORE_THRESHOLD_WATCH <= score < SCORE_THRESHOLD_BUY,
+        "triggered_items": triggered_items,
+        "details": details,
         "values": {
             "close": round(close, 2),
-            "sma60": round(latest["SMA60"], 2),
-            "sma20": round(latest["SMA20"], 2),
-            "macd_hist": round(latest["MACDh_12_26_9"], 4),
-            "prev_macd_hist": round(prev["MACDh_12_26_9"], 4),
+            "sma60": round(sma60, 2),
+            "sma20": round(sma20, 2),
+            "macd_hist": round(macd_hist, 4),
+            "prev_macd_hist": round(prev_macd_hist, 4),
             "rsi": round(rsi, 2),
-            "bbl": round(latest[bbl_col], 2),
-            "bbm": round(latest[bbm_col], 2),
             "k": round(k_value, 2),
             "d": round(d_value, 2),
             "volume": int(volume),
@@ -591,89 +605,47 @@ def evaluate_triple_buy_strategies(df):
         },
     }
 
+
 def get_buy_recommendation(strategy_result, up_prob):
-    if strategy_result.get("legacy_1_3_buy"):
-        return True, "legacy_strong"
-    if strategy_result.get("legacy_s3_alone_buy") and up_prob > STRONG_RECOMMEND_MIN_WIN_RATE:
-        return True, "legacy_s3"
+    """根據綜合評分 + 勝率決定推薦等級"""
+    is_rec = strategy_result.get("is_recommended", False)
+    rec_type = strategy_result.get("rec_type")
+    score = strategy_result.get("score", 0)
 
-    pass_count = strategy_result["pass_count"]
-    primary = strategy_result["primary_signal"]
-
-    if pass_count >= 2 and up_prob > STRONG_RECOMMEND_MIN_WIN_RATE:
-        return True, "strong"
-    if primary and up_prob > RECOMMEND_MIN_WIN_RATE:
-        return True, "normal"
+    if is_rec and up_prob >= RECOMMEND_MIN_WIN_RATE:
+        return True, rec_type or "normal"
+    if is_rec:
+        return True, "watch"
     return False, None
 
-FIVE_STRATEGY_DEFS = [
-    ("strategy_1_buy", "A 多頭回檔"),
-    ("strategy_2_buy", "B 動能突破"),
-    ("strategy_3_buy", "C 超賣反彈"),
-    ("legacy_s3_alone_buy", "原策略三"),
-    ("legacy_1_3_buy", "經典 1+3"),
-]
 
-def strategy_trigger_icon(triggered):
-    return "○" if triggered else "✗"
+def format_signal_board(result):
+    """格式化顯示綜合評分結果"""
+    lines = []
+    lines.append("\n📊 四大面向綜合評分")
+    lines.append("────────────────────")
+    lines.append(f"  總分：{result['score']} / {SCORE_THRESHOLD_STRONG}（強烈買入門檻）")
+    lines.append(f"  訊號：{result['signal']}")
+    lines.append("")
+    for category, items in result["details"].items():
+        if items:
+            lines.append(f"  {category}：")
+            for item in items:
+                lines.append(f"    ✅ {item}")
+    if result["triggered_items"]:
+        lines.append("\n  📋 觸發項目一覽：")
+        for item in result["triggered_items"]:
+            lines.append(f"    {item}")
+    return "\n".join(lines)
 
-def format_five_strategy_status(result):
-    return "".join(strategy_trigger_icon(result.get(key, False)) for key, _ in FIVE_STRATEGY_DEFS)
-
-def format_five_strategy_compact(result):
-    return " ".join(
-        f"{label}{strategy_trigger_icon(result.get(key, False))}"
-        for key, label in FIVE_STRATEGY_DEFS
-    )
-
-def has_any_strategy_trigger(result):
-    return any(result.get(key, False) for key, _ in FIVE_STRATEGY_DEFS)
-
-def print_five_strategy_board(result):
-    print("\n📋 五大策略觸發一覽（○=觸發  ✗=未觸發）")
-    print("────────────────────")
-    for key, label in FIVE_STRATEGY_DEFS:
-        triggered = result.get(key, False)
-        print(f"   {strategy_trigger_icon(triggered)}  {label}")
-    print(f"   快覽：{format_five_strategy_compact(result)}")
 
 def get_rec_type_label(rec_type):
     labels = {
-        "legacy_strong": "經典 1+3 強烈推薦",
-        "legacy_s3": "原策略三推薦",
-        "strong": "強烈推薦",
-        "normal": "推薦",
+        "strong": "🔥 強烈買入",
+        "normal": "✅ 買入",
+        "watch": "👀 觀察",
     }
     return labels.get(rec_type, "推薦")
-
-def print_triple_strategy_report(strategy_result):
-    status = lambda ok: "✅ 符合" if ok else "❌ 不符合"
-    d = strategy_result["details"]
-    v = strategy_result["values"]
-
-    print("\n🎯 優化三場景策略（回測勝率優化版）：")
-    print(f"   場景 A 多頭回檔：{status(strategy_result['strategy_1_buy'])}")
-    for key, ok in d["strategy_1"].items():
-        print(f"      - {key}：{status(ok)}")
-
-    print(f"   場景 B 動能突破：{status(strategy_result['strategy_2_buy'])}")
-    for key, ok in d["strategy_2"].items():
-        print(f"      - {key}：{status(ok)}")
-
-    print(f"   場景 C 超賣反彈：{status(strategy_result['strategy_3_buy'])}")
-    for key, ok in d["strategy_3"].items():
-        print(f"      - {key}：{status(ok)}")
-
-    print(f"\n   原策略三（單獨）：{status(strategy_result['legacy_s3_alone_buy'])}")
-    for key, ok in d["legacy_s3_alone"].items():
-        print(f"      - {key}：{status(ok)}")
-
-    print(f"\n   經典策略 1+3（高報酬模式）：{status(strategy_result['legacy_1_3_buy'])}")
-    for key, ok in d["legacy_1_3"].items():
-        print(f"      - {key}：{status(ok)}")
-
-    print(f"\n🏁 最終訊號：{strategy_result['final_signal']}")
-    print(f"   五大策略快覽：{format_five_strategy_compact(strategy_result)}")
 
 def get_trend_filter(df):
     latest = df.iloc[-1]
@@ -944,7 +916,7 @@ def analyze_stock_from_df(stock_id, category, df, skip_probability=False):
 
     df = compute_indicators(df)
     trend_filter = get_trend_filter(df)
-    strategy_result = evaluate_triple_buy_strategies(df)
+    strategy_result = evaluate_multi_factor_strategy(df)
 
     if skip_probability:
         up_prob, down_prob, prob_method, avg_return, sample_count = (
@@ -957,7 +929,7 @@ def analyze_stock_from_df(stock_id, category, df, skip_probability=False):
         )
         is_recommended, rec_type = get_buy_recommendation(strategy_result, up_prob)
 
-    all_strategies_pass = strategy_result["pass_count"] >= 2
+    score = strategy_result["score"]
     latest = df.iloc[-1]
     return {
         "stock_id": stock_id,
@@ -965,22 +937,19 @@ def analyze_stock_from_df(stock_id, category, df, skip_probability=False):
         "category": category,
         "close": round(latest["Close"], 2),
         "date": latest.name.strftime("%Y-%m-%d"),
-        "strategy_1_buy": strategy_result["strategy_1_buy"],
-        "strategy_2_buy": strategy_result["strategy_2_buy"],
-        "strategy_3_buy": strategy_result["strategy_3_buy"],
-        "pass_count": strategy_result["pass_count"],
-        "legacy_s3_alone_buy": strategy_result["legacy_s3_alone_buy"],
-        "legacy_1_3_buy": strategy_result["legacy_1_3_buy"],
-        "all_strategies_pass": all_strategies_pass,
+        "score": score,
+        "is_recommended": is_recommended,
+        "rec_type": rec_type,
+        "is_watch": strategy_result.get("is_watch", False),
         "up_prob": up_prob,
         "down_prob": down_prob,
         "avg_return": avg_return,
         "sample_count": sample_count,
         "prob_method": prob_method,
         "trend": trend_filter["trend"],
-        "is_recommended": is_recommended,
-        "rec_type": rec_type,
-        "final_signal": strategy_result["final_signal"],
+        "final_signal": strategy_result["signal"],
+        "triggered_items": strategy_result["triggered_items"],
+        "strategy_details": strategy_result["details"],
     }
 
 def fetch_stock_histories_batch(stock_ids, period=SCAN_FAST_PERIOD):
@@ -1391,19 +1360,22 @@ def scan_stock_list(stock_map, all_results, recommendations, trending_triggered,
             result["is_trending"] = category == "今日網路焦點新股"
             all_results.append(result)
 
-            if result["is_trending"] and (
-                result["pass_count"] >= 2
-                or result.get("legacy_1_3_buy")
-                or result.get("legacy_s3_alone_buy")
-            ):
-                print(f"🌐 焦點觸發！[{format_five_strategy_status(result)}] 勝率 {result['up_prob']}%")
+            score = result.get("score", 0)
+            triggered = score >= SCORE_THRESHOLD_BUY
+            watch = score >= SCORE_THRESHOLD_WATCH
+            trigger_str = f"評分 {score}分"
+
+            if result["is_trending"] and triggered:
+                print(f"🌐 焦點觸發！[{trigger_str}] 勝率 {result['up_prob']}%")
                 trending_triggered.append(result)
             elif result["is_recommended"]:
                 label = get_rec_type_label(result.get("rec_type"))
-                print(f"🔥 {label}！[{format_five_strategy_status(result)}] 勝率 {result['up_prob']}%")
+                print(f"🔥 {label}！[{trigger_str}] 勝率 {result['up_prob']}%")
                 recommendations.append(result)
+            elif watch:
+                print(f"👀 觀察 [{trigger_str}] 勝率 {result['up_prob']}%")
             else:
-                print(f"略過 [{format_five_strategy_status(result)}] 勝率 {result['up_prob']}%")
+                print(f"略過 [{trigger_str}] 勝率 {result['up_prob']}%")
 
 def daily_stock_scanner():
     scan_date = datetime.now().strftime("%Y-%m-%d")
@@ -1480,17 +1452,16 @@ def get_stock_analysis(stock_id):
     up_prob, down_prob, prob_method, avg_return, sample_count = estimate_2week_probability(
         df, total_score, trend_filter["trend"]
     )
-    strategy_result = evaluate_triple_buy_strategies(df)
+    strategy_result = evaluate_multi_factor_strategy(df)
 
     date_str = df.iloc[-1].name.strftime("%Y-%m-%d")
 
-    print("\n" + "=" * 34)
-    print(f"📊 股票代號：{stock_id}")
-    print(f"🏢 股票名稱：{stock_name}")
-    print(f"📅 交易日期：{date_str}")
-    print(f"💰 當天收盤價：${tech_values['close']}")
+    print("\n" + "=" * 43)
+    print(f"📊 股票代號：{stock_id} ｜ {stock_name}")
+    print(f"📅 交易日期：{date_str} ｜ 收盤價：${tech_values['close']}")
+    print("=" * 43)
 
-    print_five_strategy_board(strategy_result)
+    print(format_signal_board(strategy_result))
 
     print("\n🧭 趨勢過濾器：")
     print(f"   - 趨勢狀態：{trend_filter['trend']}（ADX {trend_filter['adx']}）")
@@ -1541,8 +1512,7 @@ def get_stock_analysis(stock_id):
     print(f"   - 籌碼面評分：{chip_score:+d}")
     print(f"   - 總評分：{total_score:+d}")
 
-    print_triple_strategy_report(strategy_result)
-    print("=" * 34)
+    print("=" * 43)
 
 if __name__ == "__main__":
     print("=" * 34)
