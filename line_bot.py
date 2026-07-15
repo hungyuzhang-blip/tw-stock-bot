@@ -285,8 +285,9 @@ def _async_full_market_reply(event):
     """非同步執行全市場掃描（在背景執行緒執行）"""
     try:
         report = build_full_market_reply()
-        # 全市場掃描完成後無法使用原本的 reply_token（已過期），
-        # 所以這裡透過 Messaging API 的 push_message 發送
+        # LINE 推播訊息也有 5000 字限制
+        if len(report) > 4800:
+            report = report[:4800] + "\n\n⋯（報告過長已截斷）"
         with ApiClient(configuration) as api_client:
             line_api = MessagingApi(api_client)
             line_api.push_message(
