@@ -64,6 +64,9 @@ def parse_command(text: str) -> dict:
     if t in ("全市場", "full", "full_market"):
         return {"type": "full_market"}
 
+    if t in ("重啟", "reset", "restart", "重新啟動"):
+        return {"type": "reset"}
+
     # 股票代號（純數字 4 碼）
     if t.isdigit() and len(t) == 4:
         return {"type": "stock", "stock_id": t}
@@ -197,6 +200,12 @@ def handle_message(event):
         app.logger.info(f"🔍 開始分析股票 {stock_id} {stock_name}")
         reply_text = build_stock_reply(stock_id)
         app.logger.info(f"✅ 股票分析完成 {stock_id}")
+
+    elif cmd["type"] == "reset":
+        app.logger.info("🔄 收到重啟指令")
+        _reply_message(event, "🔄 正在重啟伺服器（約 1-2 分鐘後恢復）...")
+        Thread(target=lambda: os._exit(0), daemon=True).start()
+        return
 
     elif cmd["type"] == "scan":
         app.logger.info("🔍 開始每日掃描")

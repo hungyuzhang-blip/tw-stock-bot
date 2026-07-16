@@ -28,8 +28,8 @@ STOCK_CODE_PATTERN = re.compile(r"(?<![0-9])([1-9][0-9]{3})(?![0-9])")
 YAHOO_QUOTE_PATTERN = re.compile(r"/quote/(\d{4})")
 TWSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
 SCAN_RESULTS_DIR = "scan_results"
-FULL_SCAN_WORKERS = 5
-FULL_SCAN_BATCH_SIZE = 30
+FULL_SCAN_WORKERS = 3
+FULL_SCAN_BATCH_SIZE = 20
 SCAN_FAST_PERIOD = "2y"
 
 HOT_STOCK_POOL = {
@@ -1178,12 +1178,21 @@ def scan_all_stocks_parallel(stock_ids, progress_step=100):
         if completed % progress_step < FULL_SCAN_BATCH_SIZE or completed == total:
             print(f"進度：{completed}/{total}（已發現觸發 {len(triggered_ids)} 檔）")
 
+    # 記憶體優化：只保留需要顯示的欄位，刪除多餘資料
+    def slim_result(r):
+        return {
+            "stock_id": r["stock_id"],
+            "stock_name": r["stock_name"],
+            "category": r.get("category", ""),
+            "score": r.get("score", 0),
+        }
+
     fast_triggered = [r for r in all_results if r["stock_id"] in triggered_ids]
     triggered = enrich_triggered_results(fast_triggered)
 
     enriched_map = {item["stock_id"]: item for item in triggered}
     all_results = [
-        enriched_map.get(item["stock_id"], item) for item in all_results
+        enriched_map.get(item["stock_id"], slim_result(item)) for item in all_results
     ]
     all_results = sort_results_by_win_rate(all_results)
     return all_results, triggered, failed_ids
